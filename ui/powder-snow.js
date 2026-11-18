@@ -1,122 +1,91 @@
-import { createContourSampler, sampleDepth } from './snow-surface.js';
+import { sampleDepth } from './snow-surface.js';
 
-// Production atlas, also consumed by preview/snow-preview.js.
-export const POWDER_ATLAS = new URL('./assets/snow/powder-atlas.png', import.meta.url);
-const rows = [
-  { x: 16, y: 24, width: 2140, height: 174 },
-  { x: 16, y: 282, width: 2140, height: 156 },
-  { x: 16, y: 528, width: 2140, height: 166 },
-];
-
-export function surfaceVariant(id = '') {
-  let hash = 0;
-  for (const letter of String(id)) hash = (hash * 31 + letter.charCodeAt(0)) >>> 0;
-  return hash % rows.length;
+export const POWDER_ATLAS = new URL('./assets/snow/soft-snowcap.png', import.meta.url);
+export function surfaceVariant(id='') {
+  let hash=0; for(const c of String(id)) hash=(hash*31+c.charCodeAt(0))>>>0;
+  return hash%3;
 }
 
-// Find the bottom of the main opaque snow body, excluding isolated powder specks.
-// Transparent padding in the atlas must never become a gap above a window edge.
-export function powderBottoms(data, width) {
-  return rows.map(row => {
-    const result = new Uint16Array(row.width);
-    for (let x = 0; x < row.width; x++) {
-      let run = 0, longest = 0, bottom = row.y + row.height - 1;
-      for (let y = row.y; y < row.y + row.height; y++) {
-        if (data[(y * width + row.x + x) * 4 + 3] >= 160) {
-          run++;
-          if (run > longest) { longest = run; bottom = y; }
-        } else run = 0;
-      }
-      result[x] = bottom;
+// Measure only the continuous opaque body. Isolated powder outside the asset
+// must not turn into floating pixels or enlarge the mouse hit region.
+export function measureSnowBody(data,width,height) {
+  const columns=[]; let left=width,right=0,highest=height,lowest=0;
+  for(let x=0;x<width;x++) {
+    let start=0,run=0,best=0,top=0,bottom=0;
+    for(let y=0;y<height;y++) {
+      if(data[(y*width+x)*4+3]>=192) {
+        if(!run)start=y;
+        if(++run>best){best=run;top=start;bottom=y+1;}
+      } else run=0;
     }
-    return result;
-  });
+    columns.push({top,bottom});
+    if(best>=height*.04){left=Math.min(left,x);right=x;highest=Math.min(highest,top);lowest=Math.max(lowest,bottom);}
+  }
+  if(right<=left)return null;
+  return {columns,left,right,highest,lowest,height:lowest-highest};
 }
 
-export function createPowderPainter({ image: suppliedImage, onReady = () => {}, canvasFactory } = {}) {
-  const image = suppliedImage ?? new Image();
-  let loaded = Boolean(suppliedImage);
-  let revision = loaded ? 1 : 0;
-  let bottoms;
-  const shapeCache = new Map();
-  const measure = () => {
-    if (!image.width || (!canvasFactory && typeof document === 'undefined')) return;
-    const canvas = canvasFactory ? canvasFactory(image.width, image.height) : document.createElement('canvas');
-    canvas.width = image.width; canvas.height = image.height;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(image, 0, 0);
-    bottoms = powderBottoms(ctx.getImageData(0, 0, image.width, image.height).data, image.width);
+export function createPowderPainter({image:suppliedImage,onReady=()=>{},canvasFactory}={}) {
+  const image=suppliedImage??new Image(); let body,revision=0;
+  const measure=()=>{
+    if(!image.width||(!canvasFactory&&typeof document==='undefined'))return;
+    const c=canvasFactory?canvasFactory(image.width,image.height):document.createElement('canvas');
+    c.width=image.width;c.height=image.height;
+    const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(image,0,0);
+    body=measureSnowBody(ctx.getImageData(0,0,c.width,c.height).data,c.width,c.height);
+    revision++;onReady();
   };
-  if (loaded) measure();
-  if (!suppliedImage) {
-    image.onload = () => { measure(); loaded = true; revision++; onReady(); };
-    image.onerror = () => console.warn('Snow texture unavailable; using shaded fallback.');
-    image.src = POWDER_ATLAS.href;
-  }
+  if(suppliedImage)measure();else{image.onload=measure;image.src=POWDER_ATLAS.href;}
   return {
-    get revision() { return revision; },
-    get loaded() { return loaded; },
-    paint(ctx, profile, width, column, baseline, { overhang = true, taskbar = false, variant = 0 } = {}) {
-      ctx.save();
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      const rowIndex = ((variant % rows.length) + rows.length) % rows.length;
-      const row = rows[rowIndex];
-      // Fixed horizontal texture scale: window resizing reveals more snow instead
-      // of stretching a single picture across the whole window. Mirror at joins
-      // to keep identical texture pixels on both sides of each boundary.
-      const sourceStart = row.x + 70;
-      const sourceWidth = row.width - 140;
-      const tileWidth = sourceWidth * .23;
-      const step = 2;
-      if(!shapeCache.has(width)){
-        if(shapeCache.size>=12)shapeCache.delete(shapeCache.keys().next().value);
-        shapeCache.set(width,createContourSampler(width,step));
-      }
-      const contourAt=shapeCache.get(width);
-      for (let x = 0; x < width; x += step) {
-        const depth = sampleDepth(profile, x + step / 2, column);
-        if (depth <= .05) continue;
-        const contour = contourAt(depth, x, overhang);
-        if(taskbar)contour.bottom=Math.min(5,contour.bottom);
-        let top = baseline + contour.top;
-        let bottom = baseline + contour.bottom;
-        if (overhang) {
-          // Round the two ends instead of cutting a rectangular snow ribbon.
-          const edge = Math.min(1, (x + .5) / 10, (width - x - .5) / 10);
-          const extent = Math.sqrt(Math.max(0, 1 - (1 - edge) ** 2));
-          // Taper only the top; keep the underside seated on the window edge.
-          top = bottom - (bottom - top) * extent;
-        }
-        const destinationWidth = Math.min(step, width - x);
-        ctx.globalAlpha = Math.min(1, depth / 2.5);
-        if (loaded) {
-          const phase = x + variant * 113;
-          const tile = Math.floor(phase / tileWidth);
-          const offset = phase % tileWidth;
-          const u = tile % 2 ? tileWidth - offset : offset;
-          const sourceX = sourceStart + Math.min(sourceWidth - step / .23, u / .23);
-          const bodyBottom = bottoms?.[rowIndex][Math.floor(sourceX + step / .46 - row.x)];
-          const bodyEnd = bodyBottom ?? row.y + row.height - 1;
-          // Reveal/crop snow at a fixed texture density instead of squeezing the
-          // whole cap as the user gathers snow. Keep the underside seated.
-          const textureScale = .30;
-          const sourceHeight = Math.max(1, Math.min(bodyEnd - row.y + 1, (bottom - top) / textureScale));
-          const renderedHeight = sourceHeight * textureScale;
-          ctx.fillStyle = '#f7f5fc';
-          ctx.fillRect(x, top, destinationWidth, bottom - top);
-          ctx.drawImage(image, sourceX, bodyEnd + 1 - sourceHeight, step / .23, sourceHeight,
-            x, bottom - renderedHeight, destinationWidth, renderedHeight);
-        } else {
-          const gradient = ctx.createLinearGradient(0, top, 0, bottom);
-          gradient.addColorStop(0, '#fffefb');
-          gradient.addColorStop(.5, '#f9f6fc');
-          gradient.addColorStop(1, '#c9c4e3');
-          ctx.fillStyle = gradient;
-          ctx.fillRect(x, top, destinationWidth, bottom - top);
+    get revision(){return revision;},get loaded(){return Boolean(body);},
+    paint(ctx,profile,width,column,baseline,{overhang=true,taskbar=false,variant=0}={}){
+      if(!profile.some(d=>d>.05))return;
+      ctx.save();ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+      const padding=overhang&&!taskbar?4:0;
+      const textureScale=.22;
+      const span=body?body.right-body.left:1000;
+      // Preserve the original corner artwork; reveal a mirrored middle section
+      // at fixed density instead of stretching the entire picture with a window.
+      const sourceAt=x=>{
+        if(x<32)return body.left+Math.max(0,x+padding)/(32+padding)*145;
+        const center=span-290,phase=Math.max(0,x-32)/textureScale;
+        const tile=Math.floor(phase/center),u=phase%center;
+        const middle=body.left+145+(tile%2?center-u:u);
+        const t=Math.max(0,Math.min(1,(x-(width-80))/(80+padding)));
+        return middle*(1-t*t*(3-2*t))+(body.right-145+145*t)*t*t*(3-2*t);
+      };
+      const shape=x=>{
+        const depth=sampleDepth(profile,x,column);
+        if(depth<=.05)return {top:baseline,bottom:baseline,depth:0};
+        const sx=body?sourceAt(x):0;
+        const b=body?.columns[Math.max(body.left,Math.min(body.right,Math.round(sx)))];
+        const relief=b?Math.max(0,Math.min(1,(body.lowest-b.top)/body.height)):.8;
+        const outside=Math.max(0,-x,x-width);
+        const cap=Math.sqrt(Math.max(0,1-(outside/(padding+.5))**2));
+        const fullness=Math.min(1,depth/14);
+        const lip=overhang?Math.min(taskbar?4:5,depth*.22)*( .3+.7*relief):0;
+        return {top:baseline-(depth*(.15+.85*relief)+fullness*2*relief)*cap,bottom:baseline+lip*cap,depth,sx,b};
+      };
+      const points=[];
+      for(let x=-padding;x<=width+padding;x+=.5)points.push({x,...shape(x)});
+      ctx.beginPath();ctx.moveTo(points[0].x,points[0].top);
+      for(const p of points)ctx.lineTo(p.x,p.top);
+      for(let i=points.length-1;i>=0;i--)ctx.lineTo(points[i].x,points[i].bottom);
+      ctx.closePath();ctx.clip();
+      const gradient=ctx.createLinearGradient(0,baseline-32,0,baseline+5);
+      gradient.addColorStop(0,'#fffefd');gradient.addColorStop(.55,'#f6f5fb');gradient.addColorStop(1,'#cecfe6');
+      ctx.fillStyle=gradient;ctx.fillRect(-padding,0,width+padding*2,baseline+6);
+      if(body){
+        // Half CSS-pixel slices align with the 2x raster. Sampling the complete
+        // body column retains the new artwork's white crown and blue underside.
+        for(let x=-padding;x<width+padding;x+=.5){
+          const p=shape(x+.25);if(!p.b||p.depth<=.05)continue;
+          const h=p.b.bottom-p.b.top;if(h<1)continue;
+          ctx.drawImage(image,p.sx,p.b.top,Math.max(1,.5/textureScale),h,
+            x,p.top,.5,p.bottom-p.top);
         }
       }
       ctx.restore();
-    },
+    }
   };
 }

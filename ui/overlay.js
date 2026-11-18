@@ -1,3 +1,4 @@
+import { snowPixelHit } from './snow-hit.js';
 import { createWinterProps, PROP_TYPES } from './winter-props.js';
 import { ballSizeLimit } from './ball-settings.js';
 import { createPowderPainter, surfaceVariant } from './powder-snow.js';
@@ -41,7 +42,7 @@ let taskbars = [];
 let ground, plough, snowReady = false;
 let lastDesktopSample;
 let grabbed, grabOffset, capturing = false;
-let placement;
+let placement, pendingSnow;
 let heldTree, frameRequest;
 const garlands = [], trees = [];
 let gifts = [];
@@ -55,7 +56,7 @@ const winterProps = createWinterProps(ctx, {
 });
 
 function resize() {
-  const quality = renderQuality(innerWidth, innerHeight, devicePixelRatio, 'balanced');
+  const quality = renderQuality(innerWidth, innerHeight, devicePixelRatio, 'high');
   const scale = quality.sceneScale;
   if (width === innerWidth && height === innerHeight && canvas.width === Math.round(width * scale) && canvas.height === Math.round(height * scale)) return;
   const oldGround = ground;
@@ -164,6 +165,7 @@ function configure(next) {
   } else if (!next.enabled && wasEnabled) {
     clearTimeout(frameRequest);
     cancelPlacement();
+    pendingSnow=undefined;
     grabbed = heldTree = undefined;
     winterProps.release();
     ctx.clearRect(0, 0, width, height);
@@ -460,7 +462,8 @@ function updatePileRaster(pile, now) {
   const rasterWidth = Math.ceil(rect.right - rect.left);
   if (rasterWidth < 1) return null;
   const cache = pile.raster ??= { canvas: document.createElement('canvas') };
-  const rasterScale = Math.max(1, Math.min(2, sceneScale));
+  const rasterScale = 2;
+  const padding = rect.id !== 'ground' && !rect.taskbar ? 4 : 0;
   const resized = cache.width !== rasterWidth || cache.scale !== rasterScale || cache.profile?.length !== profile.length || cache.artRevision !== powderPainter.revision;
   if (!resized && now - cache.updatedAt < 90) return cache;
   if (!resized && !profile.some((depth, i) => depth !== cache.profile[i])) return cache;
@@ -468,18 +471,21 @@ function updatePileRaster(pile, now) {
   const maxDepth = Math.max(5, ...profile);
   const rasterHeight = Math.max(48, Math.ceil(maxDepth) + 30);
   const surface = cache.canvas;
-  const pixelWidth = Math.max(1, Math.ceil(rasterWidth * rasterScale));
+  const pixelWidth = Math.max(1, Math.ceil((rasterWidth + padding * 2) * rasterScale));
   const pixelHeight = Math.max(1, Math.ceil(rasterHeight * rasterScale));
   if (surface.width !== pixelWidth) surface.width = pixelWidth;
   if (surface.height !== pixelHeight) surface.height = pixelHeight;
-  const paint = surface.getContext('2d');
+  const paint = surface.getContext('2d', {willReadFrequently:true});
   paint.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
   const baseline = rasterHeight - 12;
-  paint.clearRect(0, 0, rasterWidth, rasterHeight);
+  paint.clearRect(0, 0, rasterWidth + padding * 2, rasterHeight);
+  paint.translate(padding,0);
   const overhang=rect.id!=='ground';
   powderPainter.paint(paint, profile, rasterWidth, column, baseline,
     { overhang, taskbar: Boolean(rect.taskbar), variant: surfaceVariant(rect.id) });
+  cache.hitData = paint.getImageData(0,0,surface.width,surface.height).data;
   cache.artRevision = powderPainter.revision;
+  cache.padding = padding;
   cache.width = rasterWidth;
   cache.height = rasterHeight;
   cache.scale = rasterScale;
@@ -497,13 +503,13 @@ function paintProfile(pile, covers, now) {
   const top = rect.top - raster.baseline;
   ctx.save();
   for (const cover of covers) {
-    if (cover.right <= rect.left || cover.left >= rect.right || cover.bottom <= top || cover.top >= rect.top + 6) continue;
+    if (cover.right <= rect.left - raster.padding || cover.left >= rect.right + raster.padding || cover.bottom <= top || cover.top >= rect.top + 6) continue;
     ctx.beginPath();
     ctx.rect(0, 0, width, height);
     ctx.rect(cover.left, cover.top, cover.right - cover.left, cover.bottom - cover.top);
     ctx.clip('evenodd');
   }
-  ctx.drawImage(raster.canvas, rect.left, top, raster.width, raster.height);
+  ctx.drawImage(raster.canvas, rect.left-raster.padding, top, raster.width+raster.padding*2, raster.height);
   ctx.restore();
 }
 
@@ -658,16 +664,14 @@ function capturePointer(value) {
   wintermas.snowballPointer(value);
 }
 
-function snowAt(point, tolerance = 2) {
-  const surfaces = [...rectangles.map(rect => piles.get(rect.id)), ground];
-  for (const pile of surfaces) {
-    if (pile?.kind !== 'snow') continue;
-    const index = Math.floor((point.x - pile.rect.left) / column);
-    const depth = pile.profile[index];
-    if (depth >= 1 && point.y < pile.rect.top + (tolerance > 2 ? 4 : 0) &&
-        point.y >= pile.rect.top - snowCrown(depth, point.x - pile.rect.left) - tolerance) {
-      return { pile, index };
-    }
+function snowAt(point) {
+  for (const pile of [...rectangles.map(rect=>piles.get(rect.id)),ground]) {
+    if(pile?.kind!=='snow')continue;
+    if(!snowPixelHit(pile.raster,pile.rect,point))continue;
+    const z=rectangles.findIndex(rect=>rect.id===pile.rect.id);
+    if(pile!==ground && rectangles.slice(0,Math.max(0,z)).some(r=>point.x>=r.left&&point.x<r.right&&point.y>=r.top&&point.y<r.bottom))continue;
+    const index=Math.max(0,Math.min(pile.profile.length-1,Math.floor((point.x-pile.rect.left)/column)));
+    if(pile.profile[index]>.05)return {pile,index};
   }
   return null;
 }
@@ -689,10 +693,18 @@ function rollOnSnow(ball, point, travel) {
 
 function updateBallPointer(next, dt) {
 
-  const hovered = balls.findLast(ball => Math.hypot(ball.x - next.x, ball.y - next.y) <= ball.size + 3);
-  const snow = snowAt(next);
+  const hovered = balls.findLast(ball => Math.hypot(ball.x - next.x, ball.y - next.y) <= ball.size);
+  let snow = snowAt(next);
+  if(pendingSnow){
+    if(!next.pressed){pendingSnow=undefined;capturePointer(Boolean(hovered||snow||findDecoration(next)));return;}
+    if(Math.hypot(next.x-pendingSnow.x,next.y-pendingSnow.y)<3){capturePointer(true);return;}
+    snow=pendingSnow.snow;
+  } else if(next.pressed && !mouse.pressed && snow && !hovered){
+    pendingSnow={x:next.x,y:next.y,snow};capturePointer(true);return;
+  }
   if (!next.pressed || grabbed) capturePointer(Boolean(grabbed || hovered || snow || findDecoration(next)));
-  if (next.pressed && !mouse.pressed && (hovered || snow)) {
+  if (next.pressed && (!mouse.pressed || pendingSnow) && (hovered || snow)) {
+    pendingSnow=undefined;
     const root = hovered && stackRoot(hovered);
     const assembled = root && stackMembers(root).length >= 3;
     grabbed = assembled ? root : hovered;
@@ -891,6 +903,7 @@ wintermas.onAction(action => {
       gifts = [];
     }
   } else if (action === 'reset') {
+    pendingSnow=undefined;
     piles.clear();
     ground.profile.fill(0);
     ground.displayProfile = undefined;

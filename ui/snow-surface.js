@@ -12,10 +12,11 @@ function mound(x,spacing,seed){
 export function snowContour(depth,x,width,overhang=true){
  if(depth<=.05)return {top:0,bottom:0};
  const fullness=Math.min(1,depth/14);
- const edge=Math.min(1,Math.max(0,x)/10,Math.max(0,width-x)/10);
+ const edge=1;
+ const corner=Math.exp(-Math.max(0,Math.min(x,width-x))/7)*2;
  const crown=mound(x,83,5)*7.0+mound(x,31,29)*1.6;
  // A connected shallow layer, with occasional broader drooping lobes.
- const lip=(.8+4.8*mound(x,64,71))*fullness*edge;
+ const lip=(.8+4.8*mound(x,64,71)+corner)*fullness*edge;
  return {top:-depth-fullness*crown,bottom:overhang?Math.min(6,lip,depth*.45):0};
 }
 export function sampleDepth(profile,x,column){
