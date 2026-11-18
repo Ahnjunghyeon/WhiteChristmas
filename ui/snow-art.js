@@ -17,14 +17,6 @@ function makeBallSprite() {
   ice.addColorStop(.58, '#eff5fc');
   ice.addColorStop(1, '#91a8c5');
   oval(ctx, x, y, radius, radius * .97, ice);
-  const grains = Math.ceil(radius * 3);
-  for (let i = 0; i < grains; i++) {
-    const r = Math.sqrt((i + .5) / (grains + 3)) * radius;
-    const angle = i * 2.39996;
-    const grain = 0.4 + (i % 5) * 0.14;
-    oval(ctx, x + Math.cos(angle) * r, y + Math.sin(angle) * r,
-      grain, grain * .65, i % 2 ? '#fbfdffae' : '#809ab966');
-  }
   return canvas;
 }
 

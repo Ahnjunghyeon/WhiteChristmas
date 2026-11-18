@@ -1,10 +1,12 @@
+import { ballSizeLimit } from './ui/ball-settings.js';
+import { normalizeBottomTaskbar } from './ui/taskbar-surface.js';
 import { app, BrowserWindow, Menu, Tray, nativeImage, screen, ipcMain, powerMonitor, globalShortcut } from 'electron';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
-const defaults = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true, startup: false };
+const defaults = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true, startup: false, maxBallSize: 80 };
 const collapsed = { width: 96, height: 54 };
 const expanded = { width: 880, height: 460 };
 const appPath = app.getAppPath();
@@ -124,6 +126,7 @@ async function update(patch) {
   for (const key of ['intensity', 'wind']) {
     if (Number.isFinite(patch[key])) settings[key] = Math.max(key === 'wind' ? -100 : 0, Math.min(100, patch[key]));
   }
+  if ('maxBallSize' in patch) settings.maxBallSize = ballSizeLimit(patch.maxBallSize);
   for (const key of ['enabled', 'paused', 'taskbar', 'startup']) {
     if (typeof patch[key] === 'boolean') settings[key] = patch[key];
   }
@@ -158,7 +161,7 @@ function broadcastGeometry(windows, pressed, control, rightPressed) {
     const { x, y, width, height } = display.bounds;
     const origin = screen.dipToScreenPoint({ x, y });
     const scale = display.scaleFactor;
-    const rectangles = [];
+    let rectangles = [];
     for (const rect of windows) {
       const left = (rect.left - origin.x) / scale;
       const top = (rect.top - origin.y) / scale;
@@ -169,9 +172,7 @@ function broadcastGeometry(windows, pressed, control, rightPressed) {
       }
     }
     const workBottom = display.workArea.y + display.workArea.height - y;
-    if (workBottom < height && !rectangles.some(rect => rect.taskbar && rect.bottom >= height - 1)) {
-      rectangles.unshift({ id: 'taskbar-fallback', left: 0, top: workBottom, right: width, bottom: height, taskbar: true });
-    }
+    rectangles = normalizeBottomTaskbar(rectangles, width, height, workBottom);
     send(win, 'desktop', { rectangles, mouse: { x: mouse.x - x, y: mouse.y - y, pressed, control, rightPressed } });
   }
 }
@@ -308,6 +309,7 @@ async function start() {
       [key, typeof stored[key] === typeof value ? stored[key] : value]));
   }
   catch (error) { if (error.code !== 'ENOENT') console.error(error.message); }
+  settings.maxBallSize = ballSizeLimit(settings.maxBallSize);
   if (process.argv.includes('--smoke-test')) settings = { ...defaults };
   const area = screen.getPrimaryDisplay().workArea;
   panel = new BrowserWindow({
@@ -351,7 +353,7 @@ async function start() {
   });
   ipcMain.handle('effect:action', (event, action, color) => {
     if (event.sender !== panel.webContents || !settings.enabled || locked) return;
-    if (action === 'garland' || action === 'tree') {
+    if (['garland','tree','lantern','snack'].includes(action)) {
       const display = screen.getDisplayMatching(panel.getBounds());
       for (const [id, win] of overlays) {
         send(win, 'effect:action', id === display.id ? { placement: action, color } : 'decor-cancel');

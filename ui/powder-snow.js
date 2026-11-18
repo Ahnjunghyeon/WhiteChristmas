@@ -1,4 +1,4 @@
-import { snowContour, sampleDepth } from './snow-surface.js';
+import { createContourSampler, sampleDepth } from './snow-surface.js';
 
 // Production atlas, also consumed by preview/snow-preview.js.
 export const POWDER_ATLAS = new URL('./assets/snow/powder-atlas.png', import.meta.url);
@@ -38,6 +38,7 @@ export function createPowderPainter({ image: suppliedImage, onReady = () => {}, 
   let loaded = Boolean(suppliedImage);
   let revision = loaded ? 1 : 0;
   let bottoms;
+  const shapeCache = new Map();
   const measure = () => {
     if (!image.width || (!canvasFactory && typeof document === 'undefined')) return;
     const canvas = canvasFactory ? canvasFactory(image.width, image.height) : document.createElement('canvas');
@@ -55,7 +56,7 @@ export function createPowderPainter({ image: suppliedImage, onReady = () => {}, 
   return {
     get revision() { return revision; },
     get loaded() { return loaded; },
-    paint(ctx, profile, width, column, baseline, { overhang = true, variant = 0 } = {}) {
+    paint(ctx, profile, width, column, baseline, { overhang = true, taskbar = false, variant = 0 } = {}) {
       ctx.save();
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
@@ -67,11 +68,17 @@ export function createPowderPainter({ image: suppliedImage, onReady = () => {}, 
       const sourceStart = row.x + 70;
       const sourceWidth = row.width - 140;
       const tileWidth = sourceWidth * .23;
-      const step = 1;
+      const step = 2;
+      if(!shapeCache.has(width)){
+        if(shapeCache.size>=12)shapeCache.delete(shapeCache.keys().next().value);
+        shapeCache.set(width,createContourSampler(width,step));
+      }
+      const contourAt=shapeCache.get(width);
       for (let x = 0; x < width; x += step) {
         const depth = sampleDepth(profile, x + step / 2, column);
         if (depth <= .05) continue;
-        const contour = snowContour(depth, x, width, overhang);
+        const contour = contourAt(depth, x, overhang);
+        if(taskbar)contour.bottom=Math.min(5,contour.bottom);
         let top = baseline + contour.top;
         let bottom = baseline + contour.bottom;
         if (overhang) {
@@ -96,7 +103,7 @@ export function createPowderPainter({ image: suppliedImage, onReady = () => {}, 
           const textureScale = .30;
           const sourceHeight = Math.max(1, Math.min(bodyEnd - row.y + 1, (bottom - top) / textureScale));
           const renderedHeight = sourceHeight * textureScale;
-          ctx.fillStyle = '#eeeaf7';
+          ctx.fillStyle = '#f7f5fc';
           ctx.fillRect(x, top, destinationWidth, bottom - top);
           ctx.drawImage(image, sourceX, bodyEnd + 1 - sourceHeight, step / .23, sourceHeight,
             x, bottom - renderedHeight, destinationWidth, renderedHeight);

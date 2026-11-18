@@ -24,6 +24,7 @@
           <label class="slider"><span>강설량 <output id="intensity-value"></output></span><input id="intensity" type="range" min="0" max="100"></label>
           <label class="slider"><span>바람 <output id="wind-value"></output></span><input id="wind" type="range" min="-100" max="100"></label>
           <label class="switch secondary"><span>작업표시줄 위에 눈 쌓기</span><input id="taskbar" type="checkbox"></label>
+          <label class="slider"><span>눈덩이 최대 크기 <output id="maxBallSize-value"></output></span><input id="maxBallSize" type="range" min="40" max="120" step="1" value="80"></label><small>모아서 키울 수 있는 최대 지름입니다.</small>
         </section>
         <section class="group" aria-label="겨울 놀이">
           <h2>눈 놀이</h2>
@@ -45,6 +46,8 @@
           <div class="actions">
             <button data-action="garland"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5c2.5 7 10.500 7 13 0"/><circle cx="4.800" cy="8.600" r="1.100"/><circle cx="8" cy="10" r="1.100"/><circle cx="11.200" cy="8.600" r="1.100"/></svg>전구 줄 달기</button>
             <button data-action="tree"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.500l3.200 4.300H9.400l2.800 3.700H3.800l2.800-3.700H4.800zM8 9.500v4"/></svg>트리 놓기</button>
+            <button data-action="lantern">랜턴 놓기</button>
+            <button data-action="snack">군고구마 놓기</button>
             <button data-action="decor-reset"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>장식 치우기</button>
           </div>
         </section>

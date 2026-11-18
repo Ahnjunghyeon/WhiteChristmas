@@ -1,9 +1,11 @@
+import { createWinterProps, PROP_TYPES } from './winter-props.js';
+import { ballSizeLimit } from './ball-settings.js';
 import { createPowderPainter, surfaceVariant } from './powder-snow.js';
 import { settleSnowDisplay } from './snow-display.js';
 import { renderQuality } from './render-quality.js';
 import { gatherSnow } from './snow-gather.js';
 import { decorationAt, removeDecoration } from './decoration-hit.js';
-import { moveSurfaceSnow, snowLip, snowCrown } from './window-snow.js';
+import { moveSurfaceSnow, snowLip, snowCrown, supportMoved } from './window-snow.js';
 import { brushSnow } from './snow-brush.js';
 import { landing, bottomTaskbarAt } from './geometry.js';
 import { snowStep } from './snow-motion.js';
@@ -44,9 +46,16 @@ let heldTree, frameRequest;
 const garlands = [], trees = [];
 let gifts = [];
 const piles = new Map();
+const winterProps = createWinterProps(ctx, {
+ anchorAt, resolveAnchor, capture: capturePointer,
+ contextMenu: async () => (await wintermas.decorationMenu()) ? 'remove' : null,
+ width: () => width, height: () => height, scale: () => 1,
+ screenKey: new URLSearchParams(location.search).get('screen') || 'primary',
+ floor: x => bottomTaskbarAt(taskbars,x,height)?.top ?? height,
+});
 
 function resize() {
-  const quality = renderQuality(innerWidth, innerHeight, devicePixelRatio, 'high');
+  const quality = renderQuality(innerWidth, innerHeight, devicePixelRatio, 'balanced');
   const scale = quality.sceneScale;
   if (width === innerWidth && height === innerHeight && canvas.width === Math.round(width * scale) && canvas.height === Math.round(height * scale)) return;
   const oldGround = ground;
@@ -63,6 +72,11 @@ function resize() {
 }
 
 function releaseSnow(x, y, depth, vx, vy) {
+  if (accents.length >= 768) {
+    const bucket = accents.findLast(p => p.deposit !== undefined);
+    if(bucket){bucket.deposit += depth;return;}
+    return addPile({rect:ground.rect,x},depth/3.42);
+  }
   accents.push({
     kind: 'chunk', x, y, vx, vy, alpha: 0.94, deposit: depth,
     size: Math.min(7, Math.sqrt(depth) * 1.6),
@@ -121,7 +135,7 @@ function desktop(frame) {
       pile.rect = next;
     }
   }
-  if (!placement && !grabbed && settings.enabled && !settings.paused) {
+  if (!placement && !grabbed && !winterProps.dragging && settings.enabled && !settings.paused) {
     for (const pile of [...piles.values(), ground]) {
       const order = rectangles.findIndex(rect => rect.id === pile.rect.id);
       const covers = pile === ground ? rectangles : rectangles.slice(0, Math.max(0, order));
@@ -151,6 +165,7 @@ function configure(next) {
     clearTimeout(frameRequest);
     cancelPlacement();
     grabbed = heldTree = undefined;
+    winterProps.release();
     ctx.clearRect(0, 0, width, height);
     snowRenderer?.draw([], rectangles, settings.taskbar);
     sceneVisible = false;
@@ -317,6 +332,7 @@ function findDecoration(point) { return decorationAt(point, trees, garlands, gif
 let decorationMenuOpen = false;
 function updatePointer(next, elapsed) {
   if (decorationMenuOpen) return;
+  if (!placement && !grabbed && !heldTree && winterProps.pointer(next,mouse)) return;
   if (next.rightPressed && !mouse.rightPressed && !placement && !grabbed && !heldTree) {
     const target = findDecoration(next);
     if (target) {
@@ -337,7 +353,9 @@ function updatePointer(next, elapsed) {
     if (!inside || !clicked) return;
     const anchor = anchorAt(next);
     placement.deadline = performance.now() + 25000;
-    if (placement.kind === 'tree') {
+    if (PROP_TYPES.includes(placement.kind)) {
+      winterProps.place(placement.kind,next);cancelPlacement();
+    } else if (placement.kind === 'tree') {
       trees.push({ anchor, color: placement.color });
       if (trees.length > 16) trees.shift();
       cancelPlacement();
@@ -407,6 +425,7 @@ function updatePointer(next, elapsed) {
 }
 
 function paintDecor(now, dt) {
+  winterProps.paint(now,dt);
   for (const garland of garlands) {
     const a = resolveAnchor(garland.a), b = resolveAnchor(garland.b);
     if (!a || !b) continue;
@@ -422,6 +441,7 @@ function paintDecor(now, dt) {
   }
   for (const gift of gifts) drawGift(ctx, gift);
   if (!placement || mouse.x < 0 || mouse.y < 0 || mouse.x >= width || mouse.y >= height) return;
+  if (PROP_TYPES.includes(placement.kind)) {winterProps.preview(placement.kind,mouse,now);return;}
   const start = placement.start && resolveAnchor(placement.start);
   if (start) drawGarland(ctx, start, mouse, placement.color, now, true);
   if (placement.kind === 'tree') drawTree(ctx, mouse.x, mouse.y, placement.color, now);
@@ -442,7 +462,7 @@ function updatePileRaster(pile, now) {
   const cache = pile.raster ??= { canvas: document.createElement('canvas') };
   const rasterScale = Math.max(1, Math.min(2, sceneScale));
   const resized = cache.width !== rasterWidth || cache.scale !== rasterScale || cache.profile?.length !== profile.length || cache.artRevision !== powderPainter.revision;
-  if (!resized && now - cache.updatedAt < 30) return cache;
+  if (!resized && now - cache.updatedAt < 90) return cache;
   if (!resized && !profile.some((depth, i) => depth !== cache.profile[i])) return cache;
 
   const maxDepth = Math.max(5, ...profile);
@@ -456,9 +476,9 @@ function updatePileRaster(pile, now) {
   paint.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
   const baseline = rasterHeight - 12;
   paint.clearRect(0, 0, rasterWidth, rasterHeight);
-  const overhang=rect.id!=='ground' && !rect.taskbar;
+  const overhang=rect.id!=='ground';
   powderPainter.paint(paint, profile, rasterWidth, column, baseline,
-    { overhang, variant: surfaceVariant(rect.id) });
+    { overhang, taskbar: Boolean(rect.taskbar), variant: surfaceVariant(rect.id) });
   cache.artRevision = powderPainter.revision;
   cache.width = rasterWidth;
   cache.height = rasterHeight;
@@ -564,7 +584,7 @@ function updateSnowProps(dt, byId) {
     }
     if (ball.support) {
       const rect = ball.support === 'ground' ? ground.rect : byId.get(ball.support);
-      if (rect && (!rect.taskbar || settings.taskbar)) {
+      if (rect && (!rect.taskbar || settings.taskbar) && !supportMoved(ball.previousSupport, rect)) {
         ball.x += rect.left - ball.previousSupport.left;
         ball.y = rect.top - ball.size;
         ball.previousSupport = rect;
@@ -658,10 +678,12 @@ function rollOnSnow(ball, point, travel) {
   if (!contact || travel < 0.1) return;
   const { pile, index } = contact;
   const reach = Math.ceil(radius / column);
+  const maximum = ballSizeLimit(settings.maxBallSize);
+  if (ball.size >= maximum) return;
   const direction = point.x >= mouse.x ? 1 : -1;
-  const gathered = gatherSnow(pile.profile,index,reach,travel,ball.size,34,direction,column);
+  const gathered = gatherSnow(pile.profile,index,reach,travel,ball.size,maximum,direction,column);
   pile.raster = undefined;
-  ball.size = Math.min(34, Math.sqrt(ball.size ** 2 + gathered * 0.85));
+  ball.size = Math.min(maximum, Math.sqrt(ball.size ** 2 + gathered * 0.85));
   ball.y = pile.rect.top - ball.size + 1;
 }
 
@@ -792,7 +814,7 @@ function frame() {
   const now = performance.now();
   const interval = 1000 / 60;
   if (settings.paused && !particles.length && !accents.length && !balls.length && !gifts.length &&
-      !placement && !plough && !garlands.length && !trees.length && !piles.size &&
+      !winterProps.active && !placement && !plough && !garlands.length && !trees.length && !piles.size &&
       !ground.profile.some(Boolean)) {
     // Clear the last animation frame once, then avoid sending empty frames to DWM.
     if (previous !== undefined || !document.documentElement.dataset.rendered) {
@@ -814,9 +836,9 @@ function frame() {
   updateParticles(dt);
   snowRenderer?.draw(particles, rectangles, settings.taskbar);
   const sceneNeeded = !snowRenderer && particles.length || accents.length || balls.length ||
-    gifts.length || placement || plough || garlands.length || trees.length || piles.size ||
+    gifts.length || winterProps.active || placement || plough || garlands.length || trees.length || piles.size ||
     ground.profile.some(Boolean);
-  const fastScene = !snowRenderer && particles.length || grabbed || heldTree || plough ||
+  const fastScene = winterProps.dragging || !snowRenderer && particles.length || grabbed || heldTree || plough ||
     accents.length || balls.some(ball => !ball.support || Math.abs(ball.vx) > 1) ||
     gifts.some(gift => !gift.support) || garlands.some(garland => garland.rope.active > 0) ||
     trees.some(tree => Math.abs(tree.tilt ?? 0) > .003 || Math.abs(tree.velocity ?? 0) > .02);
@@ -856,13 +878,14 @@ function drawScene(now, dt) {
 wintermas.onDesktop(desktop);
 wintermas.onSettings(configure);
 wintermas.onAction(action => {
-  if (action?.placement === 'garland' || action?.placement === 'tree') {
+  if (PROP_TYPES.includes(action?.placement) || action?.placement === 'garland' || action?.placement === 'tree') {
     placement = { kind: action.placement, color: action.color, deadline: performance.now() + 25000 };
     return;
   }
   if (action === 'decor-cancel' || action === 'decor-reset') {
     cancelPlacement();
     if (action === 'decor-reset') {
+      winterProps.clear();
       heldTree = undefined;
       garlands.length = trees.length = 0;
       gifts = [];
@@ -897,7 +920,7 @@ wintermas.onAction(action => {
     const gathered = pile.profile.slice(first, end).reduce((sum, depth) => sum + depth, 0);
     if (gathered < 3) return;
     for (let i = first; i < end; i++) pile.profile[i] *= .35;
-    const size = Math.max(10, Math.min(26, Math.sqrt(gathered) * 3.8));
+    const size = Math.max(10, Math.min(ballSizeLimit(settings.maxBallSize), Math.sqrt(gathered) * 3.8));
     balls.push({ x: mouse.x, y: pile.rect.top - size, size, vx: 0, vy: 0,
       support: pile.rect.id, previousSupport: pile.rect });
   } else if (action === 'snowball') {

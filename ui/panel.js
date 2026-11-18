@@ -94,9 +94,9 @@ function show(settings) {
   id('options').disabled = !settings.enabled;
   id('snow').checked = !settings.paused;
   id('taskbar').checked = settings.taskbar;
-  for (const key of ['intensity', 'wind']) {
+  for (const key of ['intensity', 'wind', 'maxBallSize']) {
     id(key).value = settings[key];
-    id(key + '-value').textContent = settings[key] + ' %';
+    id(key + '-value').textContent = key === 'maxBallSize' ? '지름 ' + settings[key] * 2 + 'px' : settings[key] + ' %';
     paint(key);
   }
 }
@@ -125,15 +125,15 @@ document.addEventListener('keydown', event => {
 id('enabled').addEventListener('change', () => update({ enabled: id('enabled').checked }));
 id('snow').addEventListener('change', () => update({ paused: !id('snow').checked }));
 id('taskbar').addEventListener('change', () => update({ taskbar: id('taskbar').checked }));
-for (const key of ['intensity', 'wind']) {
-  id(key).addEventListener('input', () => { id(key + '-value').textContent = id(key).value + ' %'; paint(key); });
+for (const key of ['intensity', 'wind', 'maxBallSize']) {
+  id(key).addEventListener('input', () => { id(key + '-value').textContent = key === 'maxBallSize' ? '지름 ' + Number(id(key).value) * 2 + 'px' : id(key).value + ' %'; paint(key); });
   id(key).addEventListener('change', () => update({ [key]: Number(id(key).value) }));
 }
 for (const button of document.querySelectorAll('[data-action]')) {
   button.addEventListener('click', async () => {
     try {
       const action = button.dataset.action;
-      if (action === 'garland' || action === 'tree') {
+      if (['garland','tree','lantern','snack'].includes(action)) {
         await setOpen(false);
         await wintermas.action(action, id('lights').value);
       } else await wintermas.action(action);
