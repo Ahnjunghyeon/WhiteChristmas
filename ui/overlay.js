@@ -465,8 +465,8 @@ function updatePileRaster(pile, now) {
   const rasterScale = 2;
   const padding = rect.id !== 'ground' && !rect.taskbar ? 4 : 0;
   const resized = cache.width !== rasterWidth || cache.scale !== rasterScale || cache.profile?.length !== profile.length || cache.artRevision !== powderPainter.revision;
-  if (!resized && now - cache.updatedAt < 90) return cache;
-  if (!resized && !profile.some((depth, i) => depth !== cache.profile[i])) return cache;
+  if (!resized && now - cache.updatedAt < (grabbed || capturing ? 50 : 120)) return cache;
+  if (!resized && !profile.some((depth, i) => Math.round(depth*4) !== Math.round(cache.profile[i]*4))) return cache;
 
   const maxDepth = Math.max(5, ...profile);
   const rasterHeight = Math.max(48, Math.ceil(maxDepth) + 30);
@@ -475,7 +475,7 @@ function updatePileRaster(pile, now) {
   const pixelHeight = Math.max(1, Math.ceil(rasterHeight * rasterScale));
   if (surface.width !== pixelWidth) surface.width = pixelWidth;
   if (surface.height !== pixelHeight) surface.height = pixelHeight;
-  const paint = surface.getContext('2d', {willReadFrequently:true});
+  const paint = surface.getContext('2d');
   paint.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
   const baseline = rasterHeight - 12;
   paint.clearRect(0, 0, rasterWidth + padding * 2, rasterHeight);
@@ -483,7 +483,7 @@ function updatePileRaster(pile, now) {
   const overhang=rect.id!=='ground';
   powderPainter.paint(paint, profile, rasterWidth, column, baseline,
     { overhang, taskbar: Boolean(rect.taskbar), variant: surfaceVariant(rect.id) });
-  cache.hitData = paint.getImageData(0,0,surface.width,surface.height).data;
+  cache.hitData = undefined; // Read only on an actual in-bounds hit query.
   cache.artRevision = powderPainter.revision;
   cache.padding = padding;
   cache.width = rasterWidth;
@@ -824,7 +824,7 @@ function paintSnowFallback() {
 
 function frame() {
   const now = performance.now();
-  const interval = 1000 / 60;
+  const interval = 1000 / (grabbed || capturing || winterProps.dragging ? 60 : 30);
   if (settings.paused && !particles.length && !accents.length && !balls.length && !gifts.length &&
       !winterProps.active && !placement && !plough && !garlands.length && !trees.length && !piles.size &&
       !ground.profile.some(Boolean)) {

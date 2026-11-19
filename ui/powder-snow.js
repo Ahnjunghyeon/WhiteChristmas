@@ -27,6 +27,8 @@ export function measureSnowBody(data,width,height) {
 
 export function createPowderPainter({image:suppliedImage,onReady=()=>{},canvasFactory}={}) {
   const image=suppliedImage??new Image(); let body,revision=0;
+  const textures=new Map();let texturePixels=0;
+  const makeCanvas=canvasFactory??(typeof document!=='undefined'?((w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;}):null);
   const measure=()=>{
     if(!image.width||(!canvasFactory&&typeof document==='undefined'))return;
     const c=canvasFactory?canvasFactory(image.width,image.height):document.createElement('canvas');
@@ -38,7 +40,7 @@ export function createPowderPainter({image:suppliedImage,onReady=()=>{},canvasFa
   if(suppliedImage)measure();else{image.onload=measure;image.src=POWDER_ATLAS.href;}
   return {
     get revision(){return revision;},get loaded(){return Boolean(body);},
-    paint(ctx,profile,width,column,baseline,{overhang=true,taskbar=false,variant=0}={}){
+    paint(ctx,profile,width,column,baseline,{overhang=true,taskbar=false,variant=0,bake=false}={}){
       if(!profile.some(d=>d>.05))return;
       ctx.save();ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
       const padding=overhang&&!taskbar?4:0;
@@ -66,8 +68,23 @@ export function createPowderPainter({image:suppliedImage,onReady=()=>{},canvasFa
         const lip=overhang?Math.min(taskbar?4:5,depth*.22)*( .3+.7*relief):0;
         return {top:baseline-(depth*(.15+.85*relief)+fullness*2*relief)*cap,bottom:baseline+lip*cap,depth,sx,b};
       };
+      let texture;
+      if(body&&makeCanvas&&!bake){
+        const key=`${width}:${overhang}:${taskbar}:${variant}`;
+        texture=textures.get(key);
+        if(!texture){
+          const pixels=Math.ceil((width+padding*2)*2)*176;
+          while(textures.size&&(texturePixels+pixels>4_000_000||textures.size>=12)){
+            const first=textures.keys().next().value;texturePixels-=textures.get(first).width*textures.get(first).height;textures.delete(first);
+          }
+          texture=makeCanvas(Math.ceil((width+padding*2)*2),176);
+          const tc=texture.getContext('2d');tc.scale(2,2);tc.translate(padding,0);
+          this.paint(tc,new Float32Array(profile.length).fill(28),width,column,76,{overhang,taskbar,variant,bake:true});
+          if(pixels<=4_000_000){textures.set(key,texture);texturePixels+=texture.width*texture.height;}
+        }else{textures.delete(key);textures.set(key,texture);}
+      }
       const points=[];
-      for(let x=-padding;x<=width+padding;x+=.5)points.push({x,...shape(x)});
+      for(let x=-padding;x<=width+padding;x+=(bake?.5:2))points.push({x,...shape(x)});
       ctx.beginPath();ctx.moveTo(points[0].x,points[0].top);
       for(const p of points)ctx.lineTo(p.x,p.top);
       for(let i=points.length-1;i>=0;i--)ctx.lineTo(points[i].x,points[i].bottom);
@@ -75,7 +92,10 @@ export function createPowderPainter({image:suppliedImage,onReady=()=>{},canvasFa
       const gradient=ctx.createLinearGradient(0,baseline-32,0,baseline+5);
       gradient.addColorStop(0,'#fffefd');gradient.addColorStop(.55,'#f6f5fb');gradient.addColorStop(1,'#cecfe6');
       ctx.fillStyle=gradient;ctx.fillRect(-padding,0,width+padding*2,baseline+6);
-      if(body){
+      if(texture){
+        const depth=Math.max(...profile);
+        ctx.drawImage(texture,0,92,texture.width,70,-padding,baseline-depth-2,width+padding*2,depth+7);
+      }else if(body){
         // Half CSS-pixel slices align with the 2x raster. Sampling the complete
         // body column retains the new artwork's white crown and blue underside.
         for(let x=-padding;x<width+padding;x+=.5){
