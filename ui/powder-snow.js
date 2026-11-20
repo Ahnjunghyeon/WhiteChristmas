@@ -40,7 +40,7 @@ export function createPowderPainter({image:suppliedImage,onReady=()=>{},canvasFa
   if(suppliedImage)measure();else{image.onload=measure;image.src=POWDER_ATLAS.href;}
   return {
     get revision(){return revision;},get loaded(){return Boolean(body);},
-    paint(ctx,profile,width,column,baseline,{overhang=true,taskbar=false,variant=0,bake=false}={}){
+    paint(ctx,profile,width,column,baseline,{overhang=true,taskbar=false,variant=0,bake=false,range}={}){
       if(!profile.some(d=>d>.05))return;
       ctx.save();ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
       const padding=overhang&&!taskbar?4:0;
@@ -84,7 +84,7 @@ export function createPowderPainter({image:suppliedImage,onReady=()=>{},canvasFa
         }else{textures.delete(key);textures.set(key,texture);}
       }
       const points=[];
-      for(let x=-padding;x<=width+padding;x+=(bake?.5:2))points.push({x,...shape(x)});
+      for(let x=range?.left??-padding;x<=(range?.right??width+padding);x+=(bake?.5:2))points.push({x,...shape(x)});
       ctx.beginPath();ctx.moveTo(points[0].x,points[0].top);
       for(const p of points)ctx.lineTo(p.x,p.top);
       for(let i=points.length-1;i>=0;i--)ctx.lineTo(points[i].x,points[i].bottom);

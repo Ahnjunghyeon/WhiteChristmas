@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('wintermas', {
   snowballPointer: capture => ipcRenderer.send('snowball:pointer', capture),
   action: (action, color) => ipcRenderer.invoke('effect:action', action, color),
   widget: (open, contentHeight) => ipcRenderer.invoke('widget:open', open, contentHeight),
+  widgetDrag: phase => ipcRenderer.send('widget:drag', phase),
   hideWidget: () => ipcRenderer.invoke('widget:hide'),
 });
 

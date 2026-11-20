@@ -1,5 +1,5 @@
 const palettes = {
-  classic: ['#ff7569', '#ffd377', '#70e7a5', '#82b9ff'],
+  classic: ['#ffe2a1', '#ffe2a1', '#73966f', '#ffe2a1', '#b85a55', '#ffe2a1'],
   warm: ['#ffe2a1', '#fff6db'],
   ice: ['#8edfff', '#b6b4ff', '#ecfbff'],
   holly: ['#ff665e', '#72e7a5'],
@@ -16,23 +16,23 @@ function bulb(ctx, x, y, color, pulse, size = 2.8) {
   let sprite = bulbSprites.get(color);
   if (!sprite) {
     sprite = document.createElement('canvas');
-    sprite.width = sprite.height = 32;
-    const paint = sprite.getContext('2d');
-    const glow = paint.createRadialGradient(16, 16, 1, 16, 16, 15);
-    glow.addColorStop(0, color);
-    glow.addColorStop(.27, color + 'a0');
-    glow.addColorStop(1, color + '00');
-    paint.fillStyle = glow;
-    paint.fillRect(0, 0, 32, 32);
-    paint.fillStyle = color;
-    paint.beginPath(); paint.ellipse(16, 16, 4, 5, 0, 0, Math.PI * 2); paint.fill();
-    paint.fillStyle = '#fff7db'; paint.fillRect(15, 13, 2, 3);
+    sprite.width = sprite.height = 128;
+    const paint = sprite.getContext('2d');paint.scale(4,4);
+    const glow = paint.createRadialGradient(16,18,2,16,18,15);
+    glow.addColorStop(0,color+'75');glow.addColorStop(.5,color+'24');glow.addColorStop(1,color+'00');
+    paint.fillStyle=glow;paint.fillRect(0,0,32,32);
+    const glass=paint.createLinearGradient(11,0,21,0);
+    glass.addColorStop(0,'#6e512f');glass.addColorStop(.35,color);glass.addColorStop(.65,'#fff1c7');glass.addColorStop(1,color);
+    paint.fillStyle=glass;paint.beginPath();paint.moveTo(12,12);paint.bezierCurveTo(7,18,13,25,16,28);paint.bezierCurveTo(19,25,25,18,20,12);paint.closePath();paint.fill();
+    const brass=paint.createLinearGradient(11,0,21,0);brass.addColorStop(0,'#70532a');brass.addColorStop(.4,'#e5c17b');brass.addColorStop(1,'#8e6930');
+    paint.fillStyle=brass;paint.fillRect(12,8,8,5);paint.fillRect(13,6,6,2);
+    paint.fillStyle='#fff8dfb0';paint.beginPath();paint.ellipse(14,17,1,3,.3,0,Math.PI*2);paint.fill();
     if (bulbSprites.size >= 32) bulbSprites.delete(bulbSprites.keys().next().value);
     bulbSprites.set(color, sprite);
   }
   const extent = size * 4.5;
   ctx.globalAlpha = pulse;
-  ctx.drawImage(sprite, x - extent, y - extent, extent * 2, extent * 2);
+  ctx.drawImage(sprite, x - extent, y - extent*.5, extent * 2, extent * 2);
   ctx.globalAlpha = 1;
 }
 
@@ -42,7 +42,7 @@ export function drawGarland(ctx, a, b, color, now, preview = false, nodes) {
   const midX = (a.x + b.x) / 2;
   const midY = (a.y + b.y) / 2 + sag;
   ctx.save();
-  ctx.strokeStyle = preview ? '#9ce2bc' : '#18392b';
+  ctx.strokeStyle = preview ? '#cbb376' : '#294432';
   ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(a.x, a.y);
   if (nodes) {
@@ -54,13 +54,13 @@ export function drawGarland(ctx, a, b, color, now, preview = false, nodes) {
   } else ctx.quadraticCurveTo(midX, midY, b.x, b.y);
   ctx.stroke();
   const colors = lights(color);
-  const count = nodes ? nodes.length - 1 : Math.max(1, Math.min(64, Math.floor(length / 17)));
+  const count = nodes ? nodes.length - 1 : Math.max(1, Math.min(64, Math.floor(length / 30)));
   for (let i = 0; i < count; i++) {
     const t = (i + .5) / count, u = 1 - t;
     const x = nodes ? (nodes[i].x + nodes[i + 1].x) / 2 : u * u * a.x + 2 * u * t * midX + t * t * b.x;
     const y = nodes ? (nodes[i].y + nodes[i + 1].y) / 2 : u * u * a.y + 2 * u * t * midY + t * t * b.y;
-    ctx.fillStyle = '#28503d'; ctx.fillRect(x - 1, y, 2, 4);
-    bulb(ctx, x, y + 5, colors[i % colors.length], .28 + .72 * (.5 + .5 * Math.sin(now / 180 - i * .66)) ** 2);
+    ctx.fillStyle = '#bd9b59'; ctx.fillRect(x - 1, y, 2, 4);
+    bulb(ctx, x, y + 5, colors[i % colors.length], .86 + .14 * Math.sin(now / 900 - i * .4));
   }
   ctx.restore();
 }
@@ -109,7 +109,19 @@ function makeTreeSprite() {
   return canvas;
 }
 
+const plumTree=new Image();let plumTreeTexture;
+plumTree.onload=()=>{plumTreeTexture=document.createElement('canvas');plumTreeTexture.width=400;plumTreeTexture.height=438;plumTreeTexture.getContext('2d').drawImage(plumTree,0,0,400,438);};
+plumTree.src=new URL('./assets/christmas/plum-tree.png',import.meta.url).href;
+
 export function drawTree(ctx, x, y, color, now, tilt = 0) {
+  if(plumTreeTexture){
+    ctx.save();ctx.translate(x,y);ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+    ctx.drawImage(plumTreeTexture,0,352,400,86,-52,-27,104,27);
+    ctx.translate(0,-27);ctx.rotate(tilt);
+    ctx.drawImage(plumTreeTexture,0,0,400,352,-52,-110,104,110);
+    bulb(ctx,0,-103,'#ffe2a1',.12+.05*Math.sin(now/650),1.8);
+    ctx.restore();return;
+  }
   treeSprite ??= makeTreeSprite();
   ctx.save();
   ctx.translate(x, y);

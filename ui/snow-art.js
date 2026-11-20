@@ -42,7 +42,18 @@ export function makeSnowGrain(ctx) {
   return ctx.createPattern(tile, 'repeat');
 }
 
+import { snowmanSections } from './snowman-layout.js';
+const plumSnowman=new Image();let snowmanTexture;
+plumSnowman.onload=()=>{snowmanTexture=document.createElement('canvas');snowmanTexture.width=543;snowmanTexture.height=724;snowmanTexture.getContext('2d').drawImage(plumSnowman,0,0,543,724);};
+plumSnowman.src=new URL('./assets/christmas/plum-snowman.png',import.meta.url).href;
+export const snowmanArtReady=()=>Boolean(snowmanTexture);
+
 export function drawSnowman(ctx, head, middle) {
+  if(snowmanTexture&&middle.stack){
+    ctx.save();ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+    for(const {source,target,circle}of snowmanSections(head,middle,middle.stack)){ctx.save();if(circle){ctx.beginPath();ctx.ellipse(circle.x,circle.y,circle.size,circle.size,0,0,Math.PI*2);ctx.clip();}ctx.drawImage(snowmanTexture,...source.map(n=>n/2),...target);ctx.restore();}
+    ctx.restore();return;
+  }
   const { x, y, size: r } = head;
   ctx.save();
   ctx.translate(x, y);
@@ -87,6 +98,11 @@ export function drawSnowman(ctx, head, middle) {
   oval(ctx, middle.x, middle.y + middle.size * .39, 1.7, 1.7, '#263344');
 }
 
+const winterTruck = new Image();
+let truckTexture;
+winterTruck.onload=()=>{truckTexture=document.createElement('canvas');truckTexture.width=384;truckTexture.height=240;truckTexture.getContext('2d').drawImage(winterTruck,70,115,1400,820,0,0,384,240);};
+winterTruck.src=new URL('./assets/christmas/plough.png',import.meta.url).href;
+
 export function drawPlough(ctx, x, y, heap, texture, now) {
   ctx.save();
   ctx.translate(x, y);
@@ -111,6 +127,10 @@ export function drawPlough(ctx, x, y, heap, texture, now) {
       ctx.fillStyle = texture;
       ctx.fill();
     }
+  }
+  if(truckTexture){
+    ctx.drawImage(truckTexture,-40,-80,120,80);
+    ctx.restore();return;
   }
   ctx.fillStyle = '#172231';
   ctx.beginPath(); ctx.roundRect(-22, -13, 59, 14, 7); ctx.fill();

@@ -1,3 +1,4 @@
+import { pinnedWidgetBounds, settingsLayout } from './ui/widget-bounds.js';
 import { ballSizeLimit } from './ui/ball-settings.js';
 import { normalizeBottomTaskbar } from './ui/taskbar-surface.js';
 import { app, BrowserWindow, Menu, Tray, nativeImage, screen, ipcMain, powerMonitor, globalShortcut } from 'electron';
@@ -7,8 +8,8 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
 const defaults = { enabled: false, intensity: 65, wind: 15, taskbar: true, paused: true, startup: false, maxBallSize: 80 };
-const collapsed = { width: 96, height: 54 };
-const expanded = { width: 880, height: 460 };
+const collapsed = { width: 280, height: 96 };
+const expanded = { width: 1000, height: 590 };
 const appPath = app.getAppPath();
 const native = join(appPath.endsWith('.asar') ? process.resourcesPath : appPath, 'native', 'desktop.exe');
 
@@ -55,16 +56,13 @@ function hidePanel() {
   });
 }
 
-function sizeWidget(open, contentHeight) {
-  const bounds = panel.getBounds();
-  const area = screen.getDisplayMatching(bounds).workArea;
-  const { width, height: desiredHeight } = open ? expanded : collapsed;
-  const requested = open && Number.isFinite(contentHeight) ? Math.max(160, Math.min(desiredHeight, Math.ceil(contentHeight))) : desiredHeight;
-  const height = Math.min(requested, area.height);
-  const centered = Math.round(bounds.x + (bounds.width - width) / 2);
-  const x = Math.max(area.x, Math.min(centered, area.x + area.width - width));
-  const y = Math.max(area.y, Math.min(bounds.y, area.y + area.height - height));
-  panel.setBounds({ x, y, width, height });
+let panelLogoOffset=0;
+function sizeWidget(open) {
+ const bounds=panel.getBounds(),area=screen.getDisplayMatching(bounds).workArea;
+ const anchor={x:bounds.x+panelLogoOffset,y:bounds.y};
+ const layout=open?settingsLayout(anchor,expanded,area):{bounds:{...anchor,...collapsed},logoX:0};
+ panelLogoOffset=layout.logoX;panel.setBounds(layout.bounds);
+ return {logoX:panelLogoOffset};
 }
 
 function refreshOverlays() {
@@ -346,7 +344,16 @@ async function start() {
   });
   ipcMain.handle('settings:set', (event, patch) => event.sender === panel.webContents ? update(patch) : settings);
   ipcMain.handle('widget:open', (event, open, contentHeight) => {
-    if (event.sender === panel.webContents) sizeWidget(open === true, contentHeight);
+    if (event.sender === panel.webContents) return sizeWidget(open === true, contentHeight);
+  });
+  let dragOrigin;
+  ipcMain.on('widget:drag',(event,phase)=>{
+    if(event.sender!==panel.webContents)return;
+    if(phase==='start'){dragOrigin={point:screen.getCursorScreenPoint(),bounds:panel.getBounds()};return;}
+    if(phase==='end'){dragOrigin=undefined;return;}
+    if(phase!=='move'||!dragOrigin)return;
+    const point=screen.getCursorScreenPoint();
+    panel.setPosition(Math.round(dragOrigin.bounds.x+point.x-dragOrigin.point.x),Math.round(dragOrigin.bounds.y+point.y-dragOrigin.point.y));
   });
   ipcMain.handle('widget:hide', event => {
     if (event.sender === panel.webContents) hidePanel();
@@ -358,7 +365,7 @@ async function start() {
       for (const [id, win] of overlays) {
         send(win, 'effect:action', id === display.id ? { placement: action, color } : 'decor-cancel');
       }
-    } else if (['clear', 'snowball', 'santa', 'reset', 'decor-reset'].includes(action)) {
+    } else if (['clear', 'snowball', 'reset', 'decor-reset'].includes(action)) {
       for (const win of overlays.values()) send(win, 'effect:action', action);
     }
   });

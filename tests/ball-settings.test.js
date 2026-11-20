@@ -11,3 +11,9 @@ test('actual rolling function grows to the configured cap and does not shrink ex
   assert.ok(Math.abs(box.radius-maximum)<.001);assert.equal(box.after,box.radius);assert.ok(box.same);
  }
 });
+test('rolling retains the raster canvas so partial updates and hit tests remain available',()=>{
+ const source=readFileSync(new URL('../ui/overlay.js',import.meta.url),'utf8');const fn=source.slice(source.indexOf('function rollOnSnow('),source.indexOf('\nfunction updateBallPointer'));
+ const box={ballSizeLimit,gatherSnow};vm.createContext(box);
+ vm.runInContext(`const column=6,settings={maxBallSize:80},mouse={x:10};const raster={canvas:{}};const pile={rect:{top:400},profile:new Float32Array(100).fill(20),raster};const snowAt=()=>({pile,index:50});${fn};const ball={size:10};const before=pile.profile.reduce((a,b)=>a+b,0);for(let i=0;i<20;i++)rollOnSnow(ball,{x:300,y:380},2);globalThis.kept=pile.raster===raster;globalThis.grew=ball.size>10;globalThis.collected=pile.profile.reduce((a,b)=>a+b,0)<before;`,box);
+ assert.equal(box.kept,true);assert.equal(box.grew,true);assert.equal(box.collected,true);
+});

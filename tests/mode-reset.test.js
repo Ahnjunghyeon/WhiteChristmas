@@ -1,0 +1,7 @@
+import test from'node:test';import assert from'node:assert/strict';import vm from'node:vm';import{readFileSync}from'node:fs';
+test('disabling winter clears snow but preserves existing decorations',()=>{
+ const source=readFileSync(new URL('../ui/overlay.js',import.meta.url),'utf8');const fn=source.slice(source.indexOf('function configure(next)'),source.indexOf('\nfunction addPile'));
+ const trees=[{id:'tree'}],garlands=[{id:'lights'}],gifts=[{id:'gift'}];let releases=0;
+ const box={settings:{enabled:true,paused:false,taskbar:true},piles:new Map([['window',{profile:new Float32Array([20])}]]),ground:{profile:new Float32Array([4]),raster:{}},particles:[{}],accents:[{}],balls:[{}],plough:{},fraction:2,snowReady:true,trees,garlands,gifts,frameRequest:1,cancelAnimationFrame(){},cancelPlacement(){},pendingSnow:{},grabbed:{},heldTree:{},winterProps:{release(){releases++;}},ctx:{clearRect(){}},pileContext:{clearRect(){}},width:1920,height:1080,pileSignature:'old',snowRenderer:undefined,sceneVisible:true};vm.createContext(box);vm.runInContext(fn+';configure({enabled:false,paused:false,taskbar:true});',box);
+ assert.equal(box.piles.size,0);assert.equal(box.ground.profile[0],0);assert.equal(box.ground.raster,undefined);for(const key of ['particles','accents','balls'])assert.equal(box[key].length,0);assert.equal(box.plough,undefined);assert.equal(box.snowReady,false);assert.equal(releases,1);assert.equal(box.trees,trees);assert.equal(box.garlands,garlands);assert.equal(box.gifts,gifts);
+});

@@ -1,3 +1,5 @@
+import { drawPlacementHint } from './placement-hint.js';
+import { snowDamage } from './snow-damage.js';
 import { snowPixelHit } from './snow-hit.js';
 import { createWinterProps, PROP_TYPES } from './winter-props.js';
 import { ballSizeLimit } from './ball-settings.js';
@@ -11,13 +13,19 @@ import { brushSnow } from './snow-brush.js';
 import { landing, bottomTaskbarAt } from './geometry.js';
 import { snowStep } from './snow-motion.js';
 import { resizeProfile } from './snow-profile.js';
-import { drawPlough, drawSanta, drawSnowman, drawBall, makeSnowGrain } from './snow-art.js';
+import { drawPlough, drawSnowman, drawBall, makeSnowGrain } from './snow-art.js';
 import { drawGarland, drawTree, drawGift } from './christmas-decor.js';
 import { createSnowRenderer } from './snow-renderer.js';
 import { makeRope, brushRope, stepRope } from './garland-physics.js';
 
-const canvas = document.querySelector('canvas');
+const canvas = document.querySelector('#scene');
 const ctx = canvas.getContext('2d');
+const pileCanvas=document.querySelector('#piles');
+const pileContext=pileCanvas.getContext('2d');
+let pileSignature='';
+let metricsVisible=false;const metrics=document.createElement('output');metrics.style.cssText='position:fixed;left:12px;top:12px;z-index:10;pointer-events:none;background:#17231fe8;color:white;padding:8px;font:12px monospace;white-space:pre';metrics.hidden=true;document.body.append(metrics);
+addEventListener('keydown',e=>{if(e.code==='F8'){metrics.hidden=!(metricsVisible=!metricsVisible);}});
+let metricsAt=0;
 const snowCanvas = document.querySelector('#snow');
 let snowRenderer;
 try { snowRenderer = createSnowRenderer(snowCanvas); }
@@ -63,6 +71,8 @@ function resize() {
   width = innerWidth; height = innerHeight; sceneScale = scale;
   canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(height * scale));
+  pileCanvas.width=canvas.width;pileCanvas.height=canvas.height;
+  pileContext.setTransform(scale,0,0,scale,0,0);pileSignature='';
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
   snowRenderer?.resize(width, height, quality.snowScale);
@@ -106,7 +116,7 @@ function desktop(frame) {
   const byId = new Map(rectangles.map(rect => [rect.id, rect]));
   if (settings.enabled && !settings.paused) for (const rect of rectangles) {
     if (piles.has(rect.id) || rect.top <= 1 || rect.top >= height || rect.right-rect.left < 80 || (rect.taskbar && !settings.taskbar)) continue;
-    piles.set(rect.id,{rect,profile:new Float32Array(Math.ceil((rect.right-rect.left)/column)).fill(20),kind:'snow'});
+    piles.set(rect.id,{rect,profile:new Float32Array(Math.ceil((rect.right-rect.left)/column)),kind:'snow'});
   }
   for (const [id, pile] of piles) {
     const next = byId.get(id);
@@ -161,14 +171,19 @@ function configure(next) {
   settings = next;
   if (next.enabled && !wasEnabled) {
     previous = nextFrame = undefined;
-    frameRequest = setTimeout(frame, 0);
+    frameRequest = requestAnimationFrame(frame);
   } else if (!next.enabled && wasEnabled) {
-    clearTimeout(frameRequest);
+    cancelAnimationFrame(frameRequest);
     cancelPlacement();
     pendingSnow=undefined;
     grabbed = heldTree = undefined;
     winterProps.release();
+    piles.clear();
+    if(ground){ground.profile.fill(0);ground.displayProfile=undefined;ground.raster=undefined;}
+    particles=[];accents=[];balls=[];plough=undefined;fraction=0;snowReady=false;
+    previous=nextFrame=previousScene=undefined;
     ctx.clearRect(0, 0, width, height);
+    pileContext.clearRect(0,0,width,height);pileSignature='';
     snowRenderer?.draw([], rectangles, settings.taskbar);
     sceneVisible = false;
   }
@@ -185,7 +200,7 @@ function addPile(hit, amount = 1) {
   for (let dx = -2; dx <= 2; dx++) {
     const i = center + dx;
     if (i < 0 || i >= profile.length) continue;
-    const limit = rect.id === 'ground' ? 34 : rect.taskbar ? 30 : 28;
+    const limit = rect.id === 'ground' ? 6 : rect.taskbar ? 30 : 28;
     profile[i] = Math.min(limit, profile[i] + (3 - Math.abs(dx)) * 0.38 * amount);
   }
 }
@@ -205,12 +220,7 @@ function updateParticles(dt) {
   if (!settings.paused && settings.intensity > 0) {
     if (!snowReady) {
       snowReady = true;
-      const count = Math.min(Math.floor(budget * .65), Math.round(width * height / 3200 * settings.intensity / 100));
-      for (let i = 0; i < count; i++) {
-        const flake = spawnFlake();
-        flake.y = random(-10, height);
-        particles.push(flake);
-      }
+
     }
     fraction += (snowRenderer ? 110 : 76) * settings.intensity / 100 * dt * Math.min(1.5, width / 1450);
     while (fraction >= 1) {
@@ -240,24 +250,6 @@ function updateParticles(dt) {
   });
   const trail = [];
   accents = accents.filter(p => {
-    if (p.kind === 'santa') {
-      p.age += dt;
-      const t = Math.min(1, p.age / p.duration);
-      p.x = -170 + (width + 340) * t;
-      p.y = height * (.42 - .28 * Math.sin(Math.PI * t) + .062 * Math.sin(4 * Math.PI * t));
-      p.tilt = Math.atan2(height * (-.28 * Math.PI * Math.cos(Math.PI * t) +
-        .248 * Math.PI * Math.cos(4 * Math.PI * t)), width + 340);
-      if (p.x > 24 && p.x < width - 24 && p.age >= p.nextGift && gifts.length < 24) {
-        gifts.push({ x: p.x - 20, y: p.y + 14, vx: 76, vy: 18, spin: 0,
-          color: ['#ba354e', '#3d8b6c', '#4368a7'][gifts.length % 3] });
-        p.nextGift = p.age + Math.max(.7, p.duration / 6);
-      }
-      if (Math.random() < dt * 37) trail.push({
-        kind: 'magic', x: p.x - 47, y: p.y + 7, vx: random(-65, -18), vy: random(-45, 6),
-        life: random(.38, .9), size: random(.7, 2.4),
-      });
-      return t < 1;
-    }
     if (p.deposit !== undefined) {
       const x0 = p.x, y0 = p.y;
       p.vy += dt * 420;
@@ -447,13 +439,7 @@ function paintDecor(now, dt) {
   const start = placement.start && resolveAnchor(placement.start);
   if (start) drawGarland(ctx, start, mouse, placement.color, now, true);
   if (placement.kind === 'tree') drawTree(ctx, mouse.x, mouse.y, placement.color, now);
-  const label = placement.kind === 'tree' ? '클릭해서 트리 놓기' :
-    placement.start ? 'Ctrl+클릭: 추가 · 클릭: 완료' : '클릭해서 전구 줄 시작';
-  ctx.fillStyle = '#122a23';
-  ctx.fillRect(Math.min(mouse.x + 10, width - 200), Math.max(0, mouse.y - 33), 188, 24);
-  ctx.font = '12px Segoe UI';
-  ctx.fillStyle = '#ecfff1';
-  ctx.fillText(label, Math.min(mouse.x + 18, width - 192), Math.max(16, mouse.y - 17));
+  drawPlacementHint(ctx,mouse,width);
 }
 
 function updatePileRaster(pile, now) {
@@ -466,24 +452,32 @@ function updatePileRaster(pile, now) {
   const padding = rect.id !== 'ground' && !rect.taskbar ? 4 : 0;
   const resized = cache.width !== rasterWidth || cache.scale !== rasterScale || cache.profile?.length !== profile.length || cache.artRevision !== powderPainter.revision;
   if (!resized && now - cache.updatedAt < (grabbed || capturing ? 50 : 120)) return cache;
-  if (!resized && !profile.some((depth, i) => Math.round(depth*4) !== Math.round(cache.profile[i]*4))) return cache;
+  let damage=resized?{left:0,right:rasterWidth}:snowDamage(profile,cache.profile,rasterWidth,column);
+  if(!damage)return cache;
 
   const maxDepth = Math.max(5, ...profile);
-  const rasterHeight = Math.max(48, Math.ceil(maxDepth) + 30);
+  const rasterHeight = Math.max(72, Math.ceil(maxDepth) + 30);
   const surface = cache.canvas;
   const pixelWidth = Math.max(1, Math.ceil((rasterWidth + padding * 2) * rasterScale));
   const pixelHeight = Math.max(1, Math.ceil(rasterHeight * rasterScale));
+  const textureDepth=Math.max(...profile);
+  if(surface.width!==pixelWidth||surface.height!==pixelHeight||cache.textureDepth!==textureDepth)damage={left:0,right:rasterWidth};
   if (surface.width !== pixelWidth) surface.width = pixelWidth;
   if (surface.height !== pixelHeight) surface.height = pixelHeight;
   const paint = surface.getContext('2d');
   paint.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
   const baseline = rasterHeight - 12;
-  paint.clearRect(0, 0, rasterWidth + padding * 2, rasterHeight);
+  const left=damage.left===0?-padding:damage.left;
+  const right=damage.right===rasterWidth?rasterWidth+padding:damage.right;
+  paint.save();paint.beginPath();paint.rect(left+padding,0,right-left,rasterHeight);paint.clip();
+  paint.clearRect(left+padding,0,right-left,rasterHeight);
   paint.translate(padding,0);
   const overhang=rect.id!=='ground';
   powderPainter.paint(paint, profile, rasterWidth, column, baseline,
-    { overhang, taskbar: Boolean(rect.taskbar), variant: surfaceVariant(rect.id) });
-  cache.hitData = undefined; // Read only on an actual in-bounds hit query.
+    { overhang, taskbar: Boolean(rect.taskbar), variant: surfaceVariant(rect.id),range:{left,right} });
+  paint.restore();
+  cache.damage={left,right};cache.textureDepth=textureDepth;
+  cache.hitSamples=undefined;cache.hitData = undefined; // Read only on an actual in-bounds hit query.
   cache.artRevision = powderPainter.revision;
   cache.padding = padding;
   cache.width = rasterWidth;
@@ -495,7 +489,7 @@ function updatePileRaster(pile, now) {
   return cache;
 }
 
-function paintProfile(pile, covers, now) {
+function paintProfile(pile, covers, now, ctx=pileContext) {
   const { rect, profile } = pile;
   if (!profile.some(depth => depth > 0.05) && !pile.displayProfile?.some(depth => depth > .05)) return;
   const raster = updatePileRaster(pile, now);
@@ -514,6 +508,15 @@ function paintProfile(pile, covers, now) {
 }
 
 function paintPiles(now) {
+  const active=[ground,...piles.values()];
+  const hidden=p=>{if(p===ground)return false;const z=rectangles.findIndex(r=>r.id===p.rect.id);return rectangles.slice(0,Math.max(0,z)).some(r=>r.left<=p.rect.left-4&&r.right>=p.rect.right+4&&r.top<=p.rect.top-64&&r.bottom>=p.rect.top+6);};
+  for(const pile of active)if(!hidden(pile)&&(pile.profile.some(d=>d>.05)||pile.displayProfile?.some(d=>d>.05)))updatePileRaster(pile,now);
+  const signature=JSON.stringify([settings.taskbar,rectangles,active.map(p=>[p.rect,p.raster?.updatedAt,p.profile.some(d=>d>.05)||p.displayProfile?.some(d=>d>.05)])]);
+  if(signature===pileSignature)return;
+  pileSignature=signature;
+  pileContext.clearRect(0,0,width,height);
+  pileContext.save();
+  if(!settings.taskbar)for(const r of taskbars){pileContext.beginPath();pileContext.rect(0,0,width,height);pileContext.rect(r.left,r.top-1,r.right-r.left,r.bottom-r.top+1);pileContext.clip('evenodd');}
   paintProfile(ground, [], now);
   const visible = new Set(rectangles.map(rect => rect.id));
   for (const [id, pile] of piles) {
@@ -521,8 +524,9 @@ function paintPiles(now) {
   }
   rectangles.forEach((rect, z) => {
     const pile = piles.get(rect.id);
-    if (pile) paintProfile(pile, rectangles.slice(0, z), now);
+    if (pile&&!hidden(pile)) paintProfile(pile, rectangles.slice(0, z), now);
   });
+  pileContext.restore();
 }
 
 function stackRoot(ball) {
@@ -666,7 +670,7 @@ function capturePointer(value) {
 
 function snowAt(point) {
   for (const pile of [...rectangles.map(rect=>piles.get(rect.id)),ground]) {
-    if(pile?.kind!=='snow')continue;
+    if(pile?.kind!=='snow'||pile===ground)continue;
     if(!snowPixelHit(pile.raster,pile.rect,point))continue;
     const z=rectangles.findIndex(rect=>rect.id===pile.rect.id);
     if(pile!==ground && rectangles.slice(0,Math.max(0,z)).some(r=>point.x>=r.left&&point.x<r.right&&point.y>=r.top&&point.y<r.bottom))continue;
@@ -676,9 +680,9 @@ function snowAt(point) {
   return null;
 }
 
-function rollOnSnow(ball, point, travel) {
+function rollOnSnow(ball, point, travel, rollingContact) {
   const radius = Math.min(30, ball.size);
-  const contact = snowAt({ x: point.x, y: point.y + radius - 1 }, 7) ?? snowAt(point, 7);
+  const contact = rollingContact ?? snowAt({ x: point.x, y: point.y + radius - 1 }, 7) ?? snowAt(point, 7);
   if (!contact || travel < 0.1) return;
   const { pile, index } = contact;
   const reach = Math.ceil(radius / column);
@@ -686,7 +690,7 @@ function rollOnSnow(ball, point, travel) {
   if (ball.size >= maximum) return;
   const direction = point.x >= mouse.x ? 1 : -1;
   const gathered = gatherSnow(pile.profile,index,reach,travel,ball.size,maximum,direction,column);
-  pile.raster = undefined;
+  // Preserve the canvas; snowDamage updates only changed columns.
   ball.size = Math.min(maximum, Math.sqrt(ball.size ** 2 + gathered * 0.85));
   ball.y = pile.rect.top - ball.size + 1;
 }
@@ -716,6 +720,9 @@ function updateBallPointer(next, dt) {
       if (balls.length > 24) balls.shift();
     }
     grabOffset = assembled ? { x: grabbed.x - next.x, y: grabbed.y - next.y } : { x: 0, y: 0 };
+    const supporting=grabbed.support==='ground'?ground.rect:rectangles.find(r=>r.id===grabbed.support);
+    const rollingPile=!assembled&&(snow?.pile??(supporting&&piles.get(supporting.id)));
+    if(rollingPile){grabbed.rolling={id:rollingPile.rect.id,pointerY:next.y,rect:{...rollingPile.rect}};grabOffset={x:grabbed.x-next.x,y:grabbed.y-next.y};}
     Object.assign(grabbed, { support: null, stack: null, vx: 0, vy: 0, thrown: false });
     return;
   }
@@ -737,6 +744,12 @@ function updateBallPointer(next, dt) {
   }
   if (!next.pressed) {
     const ball = grabbed;
+    const rolling=ball.rolling&&piles.get(ball.rolling.id);
+    if(rolling&&!supportMoved(ball.rolling.rect,rolling.rect)&&ball.x>=rolling.rect.left&&ball.x<rolling.rect.right){
+      Object.assign(ball,{support:rolling.rect.id,previousSupport:rolling.rect,y:rolling.rect.top-ball.size,vy:0,thrown:false});
+      ball.vx=Math.max(-400,Math.min(400,ball.vx));delete ball.rolling;grabbed=undefined;capturePointer(false);return;
+    }
+    delete ball.rolling;
     const bottom = ball.y + ball.size;
     const slow = Math.hypot(ball.vx, ball.vy) < 175;
     const aboveBall = balls.some(other => stackRoot(other) !== ball && other.support &&
@@ -746,7 +759,7 @@ function updateBallPointer(next, dt) {
       ball.x, bottom + 16, settings.taskbar)?.rect;
     if (support && ball.x > support.left && ball.x < support.right) {
       Object.assign(ball, { support: support.id, previousSupport: support,
-        y: support.top - ball.size, vx: 0, vy: 0, thrown: false });
+        y: support.top - ball.size, vx: Math.max(-400,Math.min(400,ball.vx)), vy: 0, thrown: false });
       alignStack(ball);
     } else ball.thrown = true;
     grabbed = undefined;
@@ -757,10 +770,22 @@ function updateBallPointer(next, dt) {
   grabbed.vx = grabbed.vx * 0.5 + clamp((next.x - mouse.x) / dt) * 0.5;
   grabbed.vy = grabbed.vy * 0.5 + clamp((next.y - mouse.y) / dt) * 0.5;
   grabbed.x = next.x + grabOffset.x;
+  if(grabbed.rolling){
+    const held=grabbed.rolling,pile=piles.get(held.id);
+    const valid=pile&&!supportMoved(held.rect,pile.rect)&&next.y>=held.pointerY-18&&grabbed.x>=pile.rect.left&&grabbed.x<pile.rect.right;
+    if(valid){
+      const index=Math.max(0,Math.min(pile.profile.length-1,Math.floor((grabbed.x-pile.rect.left)/column)));
+      rollOnSnow(grabbed,next,Math.abs(next.x-mouse.x),{pile,index});
+      grabbed.y=pile.rect.top-grabbed.size;grabbed.vy=0;
+      grabbed.rotation=(grabbed.rotation??0)+(next.x-mouse.x)/grabbed.size;
+      return;
+    }
+    grabOffset.y=grabbed.y-next.y;delete grabbed.rolling;
+  }
   grabbed.y = next.y + grabOffset.y;
   grabbed.rotation = (grabbed.rotation ?? 0) + (next.x - mouse.x) / grabbed.size;
   if (stackMembers(grabbed).length === 1) {
-    rollOnSnow(grabbed, next, Math.hypot(next.x - mouse.x, next.y - mouse.y));
+    // Free carry stays free; collecting is handled only in rolling mode.
   } else alignStack(grabbed);
 }
 
@@ -800,8 +825,7 @@ function paintParticle(p, now) {
     ctx.moveTo(x - size * 1.9, y); ctx.lineTo(x, y - size * .42);
     ctx.lineTo(x + size * 1.9, y); ctx.lineTo(x, y + size * .42); ctx.fill();
     ctx.fillRect(x - .45, y - size * 1.75, .9, size * 3.5);
-  } else if (kind === 'santa') {
-    drawSanta(ctx, x, y, now, p.tilt ?? 0);
+
   }
   ctx.globalAlpha = 1;
 }
@@ -824,32 +848,38 @@ function paintSnowFallback() {
 
 function frame() {
   const now = performance.now();
-  const interval = 1000 / (grabbed || capturing || winterProps.dragging ? 60 : 30);
+  const interval = 1000 / 60;
+  if(previous!==undefined&&now-previous<interval-.8){frameRequest=requestAnimationFrame(frame);return;}
   if (settings.paused && !particles.length && !accents.length && !balls.length && !gifts.length &&
       !winterProps.active && !placement && !plough && !garlands.length && !trees.length && !piles.size &&
       !ground.profile.some(Boolean)) {
     // Clear the last animation frame once, then avoid sending empty frames to DWM.
     if (previous !== undefined || !document.documentElement.dataset.rendered) {
       ctx.clearRect(0, 0, width, height);
+      pileContext.clearRect(0,0,width,height);pileSignature='';
       snowRenderer?.draw([], rectangles, settings.taskbar);
       sceneVisible = false;
       document.documentElement.dataset.rendered = 'true';
     }
     previous = undefined;
     nextFrame = undefined;
-    frameRequest = setTimeout(frame, 80);
+    frameRequest = requestAnimationFrame(frame);
     return;
   }
   // The transparent overlay can receive compositor callbacks at an unrelated cadence.
   nextFrame = nextFrame === undefined || now - nextFrame >= interval
     ? now + interval : nextFrame + interval;
-  const dt = Math.min(0.045, (now - (previous ?? now)) / 1000);
+  const dt = Math.min(.1, (now - (previous ?? now)) / 1000);
   previous = now;
-  updateParticles(dt);
+  // Small substeps keep collision and movement stable after a delayed display frame.
+  const steps=Math.max(1,Math.ceil(dt/(1/120)));
+  for(let step=0;step<steps;step++)updateParticles(dt/steps);
   snowRenderer?.draw(particles, rectangles, settings.taskbar);
+  const pilesStart=performance.now();
+  paintPiles(now);
+  const pilesMs=performance.now()-pilesStart;
   const sceneNeeded = !snowRenderer && particles.length || accents.length || balls.length ||
-    gifts.length || winterProps.active || placement || plough || garlands.length || trees.length || piles.size ||
-    ground.profile.some(Boolean);
+    gifts.length || winterProps.active || placement || plough || garlands.length || trees.length;
   const fastScene = winterProps.dragging || !snowRenderer && particles.length || grabbed || heldTree || plough ||
     accents.length || balls.some(ball => !ball.support || Math.abs(ball.vx) > 1) ||
     gifts.some(gift => !gift.support) || garlands.some(garland => garland.rope.active > 0) ||
@@ -864,8 +894,9 @@ function frame() {
     sceneVisible = false;
     previousScene = undefined;
   }
+  if(metricsVisible&&now-metricsAt>500){metricsAt=now;metrics.textContent=`Snow layer: ${pilesMs.toFixed(2)} ms\nFrame CPU: ${(performance.now()-now).toFixed(2)} ms\nWindows: ${rectangles.length} | Flakes: ${particles.length}\nF8: close`; }
   if (!document.documentElement.dataset.rendered) document.documentElement.dataset.rendered = 'true';
-  frameRequest = setTimeout(frame, Math.max(0, nextFrame - performance.now()));
+  frameRequest = requestAnimationFrame(frame);
 }
 
 function drawScene(now, dt) {
@@ -880,7 +911,6 @@ function drawScene(now, dt) {
       ctx.clip('evenodd');
     }
   }
-  paintPiles(now);
   if (!snowRenderer && particles.length) paintSnowFallback();
   for (const p of accents) paintParticle(p, now);
   paintSnowProps(now);
@@ -919,9 +949,6 @@ wintermas.onAction(action => {
   } else if (action === 'clear') {
     if (plough) return;
     plough = { x: width + 70, heap: new Float32Array(34) };
-  } else if (action === 'santa') {
-    accents.push({ kind: 'santa', x: -170, y: height * .42, age: 0,
-      duration: (width + 340) / 230, nextGift: 0, alpha: 1 });
   } else if (action === 'gather') {
     const pile = [...piles.values(), ground].find(candidate =>
       mouse.x >= candidate.rect.left && mouse.x < candidate.rect.right &&

@@ -1,3 +1,4 @@
+import { drawPlacementHint } from './placement-hint.js';
 // Original winter props for the Hyeonbit customization of Wintermas.
 export const PROP_TYPES = ['lantern', 'snack'];
 const sizes = { mobile: [90, 125], lantern: [55, 65], mailbox: [64, 83], snack: [44, 45] };
@@ -133,10 +134,7 @@ export function createWinterProps(ctx, host) {
   }
   function preview(kind,mouse,now) {
     draw({kind,x:mouse.x,y:mouse.y,lit:true},now,.7);
-    ctx.save();ctx.font='12px "Malgun Gothic",sans-serif';ctx.fillStyle='#fff8eb';
-    const x=Math.max(0,Math.min(mouse.x+12,host.width()-184)),y=Math.max(25,mouse.y-95);
-    ctx.fillRect(x,y-20,182,26);ctx.fillStyle='#806b58';
-    ctx.fillText('클릭하면 놓을 수 있어요',x+10,y-3);ctx.restore();
+    drawPlacementHint(ctx,mouse,host.width());
   }
   return {place,pointer,paint,preview,
     clear(){items=[];held=undefined;host.capture(false);save();},

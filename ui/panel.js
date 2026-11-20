@@ -1,8 +1,8 @@
+import {installWidgetDrag} from './widget-drag.js';
 const id = name => document.getElementById(name);
 const toggle = id('toggle');
 const menu = id('menu');
 const widget = document.querySelector('.widget');
-const title = document.querySelector('.title');
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
 let transitioning = false;
 
@@ -34,27 +34,15 @@ document.querySelectorAll('.actions button, #hide-widget').forEach(button =>
     button.append(dot);
   }));
 
-async function animateMenu(open, collapsed) {
-  if (motion.matches) return;
-  const bounds = widget.getBoundingClientRect();
-  const inset = Math.max(0, (bounds.width - collapsed.width) / 2);
-  const bottom = Math.max(0, bounds.height - collapsed.height);
-  const icon = toggle.getBoundingClientRect();
-  const offset = bounds.left + bounds.width / 2 - icon.left - icon.width / 2;
-  const duration = open ? 480 : 400;
-  const options = { duration, easing: 'cubic-bezier(.4, 0, .2, 1)', fill: 'both' };
-  const frames = (closed, expanded) => open ? [closed, expanded] : [expanded, closed];
-  const animations = [
-    widget.animate(frames({ clipPath: `inset(0 ${inset}px ${bottom}px round 22px)` },
-      { clipPath: 'inset(0 round 22px)' }), options),
-    toggle.animate(frames({ transform: `translate(${offset}px, -8px)` }, { transform: 'none' }), options),
-    title.animate(frames({ opacity: 0 }, { opacity: 1 }), options),
-    menu.animate(frames({ opacity: 0, transform: 'translateY(-14px)' },
-      { opacity: 1, transform: 'none' }), options),
-  ];
-  // Keep the transition bounded even if Electron pauses the hidden window's timeline.
-  await new Promise(resolve => setTimeout(resolve, duration));
-  for (const animation of animations) animation.cancel();
+async function animateMenu(open) {
+ const duration=open?240:220;
+ menu.style.opacity=open?'0':'1';
+ if(!motion.matches){
+  const animations=[widget.animate([{opacity:open?0:1},{opacity:open?1:0}],{duration,pseudoElement:'::before',fill:'both',easing:'ease-in-out'}),menu.animate([{opacity:open?0:1,transform:open?'translateY(-5px)':'none'},{opacity:open?1:0,transform:open?'none':'translateY(-5px)'}],{duration,fill:'both',easing:'ease-in-out'})];
+  await Promise.race([Promise.all(animations.map(a=>a.finished.catch(()=>{}))),new Promise(r=>setTimeout(r,350))]);
+  widget.style.setProperty('--frame-opacity',open?'1':'0');menu.style.opacity=open?'1':'0';
+  animations.forEach(a=>a.cancel());
+ }else{widget.style.setProperty('--frame-opacity',open?'1':'0');menu.style.opacity=open?'1':'0';}
 }
 
 let collapsed;
@@ -65,7 +53,9 @@ async function setOpen(open) {
   try {
     if (open) {
       collapsed = widget.getBoundingClientRect();
-      await wintermas.widget(true);
+      widget.style.setProperty('--frame-opacity','0');menu.style.opacity='0';
+      const layout=await wintermas.widget(true);
+      widget.style.setProperty('--logo-x',`${layout?.logoX??0}px`);
     }
     if (open) menu.hidden = false;
     else {
@@ -78,9 +68,8 @@ async function setOpen(open) {
     toggle.setAttribute('aria-label', open ? '겨울 설정 닫기' : '겨울 설정 열기');
     if (open) {
       menu.inert = false;
-      const resize = wintermas.widget(true, menu.offsetTop + menu.scrollHeight + 6);
-      await Promise.all([resize, animateMenu(true, collapsed)]);
-    } else await wintermas.widget(false);
+      await animateMenu(true);
+    } else {await wintermas.widget(false);widget.style.setProperty('--logo-x','0px');}
   } catch (error) { report(error); }
   finally { transitioning = false; }
 }
@@ -101,7 +90,11 @@ function show(settings) {
   }
 }
 const update = patch => wintermas.update(patch).catch(report);
+let suppressClickUntil=0;
+installWidgetDrag(widget,phase=>wintermas.widgetDrag(phase),{closed:()=>menu.hidden,onDragged:()=>{suppressClickUntil=performance.now()+300;}});
+widget.addEventListener('click',e=>{if(performance.now()<suppressClickUntil){e.preventDefault();e.stopImmediatePropagation();}},true);
 toggle.addEventListener('click', () => setOpen(menu.hidden));
+id('minimize').addEventListener('click',()=>setOpen(false));
 id('hide-widget').addEventListener('click', async () => {
   if (transitioning) return;
   try {
