@@ -1,4 +1,4 @@
-# 현빗 윈터 — 원본 기반 한글 수정본 0.2.15
+# WhiteChrismas — 원본 기반 한글 수정본 0.2.15
 
 Wintermas 원작 amiayweb: https://github.com/amiayweb/Wintermas
 
@@ -192,7 +192,7 @@ Wintermas was inspired by [KoiArt](https://koiart.app/), a desktop effects app f
 - 20개 코드 테스트 및 JS 문법 검사 통과. 실제 Windows 렉 개선 여부와 EXE 빌드는 미검증입니다.
 
 ## 배포 시 소개 예시
-현빗 윈터 — Wintermas 기반 비공식 한국어 커스텀 버전
+WhiteChirsmas — Wintermas 기반 비공식 한국어 커스텀 버전
 원작: amiayweb / https://github.com/amiayweb/Wintermas
 수정: 한글화, 설정 UI, 눈 스타일과 일부 상호작용·렌더링 조정
 라이선스: PolyForm Noncommercial 1.0.0 (LICENSE 참조)
@@ -263,7 +263,7 @@ F8로 렌더러 성능 표시를 켤 수 있습니다(오버레이가 키 입력
 
 ## 0.2.10 WhiteChrismas / 플럼 차콜
 
-환경설정의 기존 현빗 윈터 제목과 부제를 제거하고 요청한 WhiteChrismas 표기로 변경했습니다. 접힌 위젯과 펼친 헤더에 동일한 새 플럼 색상 위젯 이미지를 사용합니다. 펼친 헤더는 별도 중복 제목 없이 이미지로 표시하고 접근성 제목을 유지합니다. UI의 초록색은 스모키 플럼/차콜/샴페인 골드로 변경했습니다.
+환경설정의 기존 WhiteChirsmas 제목과 부제를 제거하고 요청한 WhiteChrismas 표기로 변경했습니다. 접힌 위젯과 펼친 헤더에 동일한 새 플럼 색상 위젯 이미지를 사용합니다. 펼친 헤더는 별도 중복 제목 없이 이미지로 표시하고 접근성 제목을 유지합니다. UI의 초록색은 스모키 플럼/차콜/샴페인 골드로 변경했습니다.
 
 눈덩이 굴리기마다 pile.raster를 삭제하던 처리를 제거했습니다. 적설 캐시를 유지해 부분 갱신과 클릭 검사를 이어갑니다. 캐시 보존 및 성장 회귀 검사를 추가했습니다. Windows 실제 성능 검증은 미완료입니다.
 
